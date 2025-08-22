@@ -1,45 +1,25 @@
+from typing import List, Dict, Any
 import hashlib
 import json
-import time
-from typing import List, Dict, Any, Optional
+from transaction import Transaction, TransactionPool
+import datetime
 
-class Block:
-    """Implementasi Bitcoin Block dengan struktur lengkap"""
-    
-    def __init__(self, index: int, timestamp: float, data: List[Dict], 
-                 previous_hash: str, nonce: int = 0, merkle_root: str = None):
+class Block:    
+    def __init__(self, index: int, timestamp: str, data: list, previous_hash: str, nonce: int = 0, merkle_root: str = None):
         self.index = index
         self.timestamp = timestamp
-        self.data = data  # List of transactions
+        self.data = data  
         self.previous_hash = previous_hash
         self.nonce = nonce
         self.merkle_root = merkle_root or self.calculate_merkle_root()
         self.hash = self.calculate_hash()
     
-    def calculate_hash(self) -> str:
-        """Hitung hash block menggunakan SHA-256"""
-        block_string = json.dumps({
-            "index": self.index,
-            "timestamp": self.timestamp,
-            "data": self.data,
-            "previous_hash": self.previous_hash,
-            "nonce": self.nonce,
-            "merkle_root": self.merkle_root
-        }, sort_keys=True)
-        return hashlib.sha256(block_string.encode()).hexdigest()
-    
     def calculate_merkle_root(self) -> str:
-        """Hitung Merkle Root dari daftar transaksi"""
         if not self.data:
             return hashlib.sha256(b'').hexdigest()
         
-        # Convert transactions to hashes
-        tx_hashes = []
-        for tx in self.data:
-            tx_string = json.dumps(tx, sort_keys=True)
-            tx_hashes.append(hashlib.sha256(tx_string.encode()).hexdigest())
+        tx_hashes = [hashlib.sha256(json.dumps(tx, sort_keys=True).encode()).hexdigest() for tx in self.data]
         
-        # Build Merkle Tree
         while len(tx_hashes) > 1:
             next_level = []
             for i in range(0, len(tx_hashes), 2):
@@ -47,15 +27,16 @@ class Block:
                     combined = tx_hashes[i] + tx_hashes[i + 1]
                 else:
                     combined = tx_hashes[i] + tx_hashes[i]
-                
                 next_level.append(hashlib.sha256(combined.encode()).hexdigest())
-            
             tx_hashes = next_level
         
         return tx_hashes[0] if tx_hashes else hashlib.sha256(b'').hexdigest()
     
+    def calculate_hash(self) -> str:
+        block_string = f"{self.index}{self.timestamp}{self.data}{self.previous_hash}{self.nonce}{self.merkle_root}"
+        return hashlib.sha256(block_string.encode()).hexdigest()
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert block ke dictionary untuk JSON serialization"""
         return {
             "index": self.index,
             "timestamp": self.timestamp,
@@ -66,148 +47,147 @@ class Block:
             "hash": self.hash
         }
     
-    def __str__(self):
-        return f"Block #{self.index} - Hash: {self.hash[:16]}... - Transactions: {len(self.data)}"
-
 class Blockchain:
-    """Implementasi Blockchain dengan validasi dan consensus"""
-    
     def __init__(self, difficulty: int = 4):
-        self.chain = [self.create_genesis_block()]
-        self.difficulty = difficulty
-        self.transaction_pool = []
-        self.mining_reward = 10.0
+        self.chain: List[Block] = []
+        self.create_genesis_block()
+        self.transaction_pool = TransactionPool()
+        self.difficulty = difficulty 
+        self.mining_reward = 10
     
-    def create_genesis_block(self) -> Block:
-        """Buat genesis block (block pertama)"""
-        genesis_data = [{
-            "sender": "Genesis",
-            "recipient": "Network",
-            "amount": 0,
-            "timestamp": time.time(),
-            "tx_id": "genesis_transaction"
-        }]
-        return Block(0, time.time(), genesis_data, "0")
+    def create_genesis_block(self):
+        with open(".env", "r") as file:
+            lines = file.readlines()
+            genesis_timestamp_str = None
+            for line in lines:
+                if line.startswith("GENESIS_TIMESTAMP="):
+                    genesis_timestamp_str = line.split("=", 1)[1].strip()
+                    break
+
+        genesis_block = Block(
+            index=0,
+            timestamp=genesis_timestamp_str,
+            data=[],
+            previous_hash="0",
+            nonce=0
+        )
+        self.chain.append(genesis_block)
+        return genesis_block
     
-    def get_latest_block(self) -> Block:
-        """Dapatkan block terakhir dalam chain"""
-        return self.chain[-1]
-    
-    def add_transaction(self, transaction: Dict[str, Any]) -> bool:
-        """Tambahkan transaksi ke transaction pool"""
-        try:
-            # Validasi basic transaksi
-            required_fields = ['sender', 'recipient', 'amount', 'tx_id']
-            if not all(field in transaction for field in required_fields):
-                return False
-            
-            if transaction['amount'] <= 0:
-                return False
-            
-            # Cek duplikasi transaksi
-            existing_tx_ids = [tx['tx_id'] for tx in self.transaction_pool]
-            if transaction['tx_id'] in existing_tx_ids:
-                return False
-            
-            self.transaction_pool.append(transaction)
-            return True
-        except Exception as e:
-            print(f"Error adding transaction: {e}")
+    def add_block(self, block: Block):
+        if not self.validate_block(block):
+            print("Invalid block. Cannot add to chain.")
             return False
-    
-    def get_balance(self, address: str) -> float:
-        """Hitung balance untuk address tertentu"""
-        balance = 0.0
         
-        for block in self.chain:
-            for tx in block.data:
-                if tx['sender'] == address:
-                    balance -= tx['amount']
-                if tx['recipient'] == address:
-                    balance += tx['amount']
-        
-        # Tambahkan dari transaction pool (pending)
-        for tx in self.transaction_pool:
-            if tx['sender'] == address:
-                balance -= tx['amount']
-        
-        return balance
-    
-    def validate_transaction(self, transaction: Dict[str, Any]) -> bool:
-        """Validasi transaksi berdasarkan balance"""
-        if transaction['sender'] == "System":  # Mining reward
-            return True
-        
-        sender_balance = self.get_balance(transaction['sender'])
-        return sender_balance >= transaction['amount']
-    
-    def is_chain_valid(self, chain: Optional[List[Block]] = None) -> bool:
-        """Validasi blockchain"""
-        if chain is None:
-            chain = self.chain
-        
-        for i in range(1, len(chain)):
-            current_block = chain[i]
-            previous_block = chain[i-1]
-            
-            # Cek hash block saat ini
-            if current_block.hash != current_block.calculate_hash():
-                print(f"Invalid hash for block {current_block.index}")
-                return False
-            
-            # Cek link ke previous block
-            if current_block.previous_hash != previous_block.hash:
-                print(f"Invalid previous hash for block {current_block.index}")
-                return False
-            
-            # Cek proof of work
-            if not current_block.hash.startswith('0' * self.difficulty):
-                print(f"Invalid proof of work for block {current_block.index}")
-                return False
-            
-            # Cek merkle root
-            if current_block.merkle_root != current_block.calculate_merkle_root():
-                print(f"Invalid merkle root for block {current_block.index}")
-                return False
-        
+        if self.chain and block.previous_hash != self.chain[-1].hash:
+            return False
+
+        self.chain.append(block)
         return True
     
-    def replace_chain(self, new_chain: List[Block]) -> bool:
-        """Ganti chain dengan chain yang lebih panjang dan valid"""
-        if len(new_chain) > len(self.chain) and self.is_chain_valid(new_chain):
-            self.chain = new_chain
-            # Clear transaction pool untuk transaksi yang sudah ada di chain
-            self.clear_processed_transactions()
-            return True
-        return False
+    def get_latest_block(self) -> Block:
+        return self.chain[-1] if self.chain else None
     
-    def clear_processed_transactions(self):
-        """Hapus transaksi yang sudah diproses dari pool"""
-        processed_tx_ids = set()
+    def get_balance(self, address: str) -> float:
+        balance = 0.0
         for block in self.chain:
             for tx in block.data:
-                processed_tx_ids.add(tx.get('tx_id'))
-        
-        self.transaction_pool = [
-            tx for tx in self.transaction_pool 
-            if tx.get('tx_id') not in processed_tx_ids
-        ]
+                if tx['recipient'] == address:
+                    balance += tx['amount']
+                elif tx['sender'] == address:
+                    balance -= tx['amount']
+        return balance
     
-    def get_chain_info(self) -> Dict[str, Any]:
-        """Dapatkan informasi lengkap tentang blockchain"""
-        return {
-            "length": len(self.chain),
-            "difficulty": self.difficulty,
-            "pending_transactions": len(self.transaction_pool),
-            "latest_block_hash": self.get_latest_block().hash,
-            "is_valid": self.is_chain_valid()
-        }
+    def validate_chain(self) -> bool:
+        for i in range(1, len(self.chain)):
+            current_block = self.chain[i]
+            previous_block = self.chain[i - 1]
+            
+            if current_block.previous_hash != previous_block.hash:
+                return False
+            
+            if current_block.hash != current_block.calculate_hash():
+                return False
+            
+            if not current_block.merkle_root or current_block.merkle_root != current_block.calculate_merkle_root():
+                return False
+            
+        return True
+    
+    def mine_block(self, miner_address: str) -> Block:
+        if not self.transaction_pool.get_transactions():
+            print("No transactions to mine.")
+            return None
+
+        reward_tx = Transaction(
+            sender="Network",
+            recipient=miner_address,
+            amount=self.mining_reward
+        )
+
+        pool_transactions = self.transaction_pool.get_transactions()
+        
+        transaction_list = [tx.to_dict() for tx in pool_transactions.values()]
+
+        transactions = transaction_list + [reward_tx.to_dict()]
+
+        latest_block = self.get_latest_block()
+        new_index = latest_block.index + 1
+        new_timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        new_block = Block(
+            index=new_index,
+            timestamp=new_timestamp,
+            data=transactions,  
+            previous_hash=latest_block.hash
+        )
+
+        while new_block.hash[:self.difficulty] != '0' * self.difficulty:
+            new_block.nonce += 1
+            new_block.hash = new_block.calculate_hash()
+
+        if self.add_block(new_block):
+            self.transaction_pool.clear()
+            print(f"Block #{new_index} mined with hash: {new_block.hash}")
+            print(f"Transaction pool cleared. Remaining transactions: {len(self.transaction_pool.get_transactions())}")
+            return new_block
+        else:
+            print("Failed to add block to chain")
+            return None
+
+    def validate_block(self, block: Block) -> bool:
+        if block.hash != block.calculate_hash():
+            print("Invalid block hash")
+            return False
+        
+        if block.merkle_root != block.calculate_merkle_root():
+            print("Invalid merkle root")
+            return False
+        
+        if block.hash[:self.difficulty] != '0' * self.difficulty:
+            print("Block doesn't meet difficulty requirement")
+            return False
+        
+        if self.chain and block.previous_hash != self.get_latest_block().hash:
+            print("Invalid previous hash")
+            return False
+        
+        return True
+
+    def replace_chain(self, new_chain: List[Block]) -> bool:
+        if len(new_chain) <= len(self.chain):
+            return False
+        
+        if not self.validate_chain():
+            return False
+        
+        self.chain = new_chain
+        return True
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert blockchain ke dictionary"""
         return {
             "chain": [block.to_dict() for block in self.chain],
             "difficulty": self.difficulty,
-            "transaction_pool": self.transaction_pool,
+            "transaction_pool": self.transaction_pool.to_dict(),
             "mining_reward": self.mining_reward
         }
