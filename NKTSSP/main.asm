@@ -2,381 +2,777 @@ format ELF64 executable 3
 
 entry start
 
-; ===================================================================
-;                            CODE SEGMENT
-; ===================================================================
+; const
+; Socket constants
+AF_INET     = 2
+SOCK_STREAM = 1
+SOL_SOCKET  = 1
+SO_REUSEADDR = 2
+
+; File constants
+O_RDONLY    = 0
+O_WRONLY    = 1
+O_RDWR      = 2
+O_CREAT     = 64
+O_TRUNC     = 512
+O_APPEND    = 1024
+
+; System calls
+SYS_READ    = 0
+SYS_WRITE   = 1
+SYS_OPEN    = 2
+SYS_CLOSE   = 3
+SYS_STAT    = 4
+SYS_LSEEK   = 8
+SYS_SOCKET  = 41
+SYS_ACCEPT  = 43
+SYS_BIND    = 49
+SYS_LISTEN  = 50
+SYS_SETSOCKOPT = 54
+SYS_FORK    = 57
+SYS_EXIT    = 60
+SYS_UNLINK  = 87
+
+; HTTP constants
+MAX_REQUEST_SIZE = 4096
+MAX_FILE_SIZE = 16384
+MAX_FILENAME_LEN = 255
+HTTP_PORT = 8080
+
+; code
 segment readable executable
 
-  ; --- Constants & Syscalls ---
-  AF_INET     = 2
-  SOCK_STREAM = 1
-  O_RDONLY    = 0
-  O_WRONLY    = 1
-  O_CREAT     = 64
-  O_TRUNC     = 512
-
-  SYS_READ    = 0
-  SYS_WRITE   = 1
-  SYS_OPEN    = 2
-  SYS_CLOSE   = 3
-  SYS_SOCKET  = 41
-  SYS_ACCEPT  = 43
-  SYS_BIND    = 49
-  SYS_LISTEN  = 50
-  SYS_FORK    = 57
-  SYS_EXIT    = 60
-  SYS_UNLINK  = 87
-
 start:
+  call print_startup_banner
+  call create_and_bind_socket
+  call start_server_loop
+
+; --- Socket Creation and Setup ---
+create_and_bind_socket:
   ; Create socket
   mov rax, SYS_SOCKET
   mov rdi, AF_INET
   mov rsi, SOCK_STREAM
   xor rdx, rdx
   syscall
-  mov r12, rax ; Save listener socket fd
-
-  ; Prepare sockaddr_in structure for binding
+  
+  cmp rax, 0
+  jl socket_error
+  mov [server_socket], rax
+  
+  ; Set SO_REUSEADDR option
+  mov rax, SYS_SETSOCKOPT
+  mov rdi, [server_socket]
+  mov rsi, SOL_SOCKET
+  mov rdx, SO_REUSEADDR
+  mov r10, socket_option_one
+  mov r8, 4
+  syscall
+  
+  ; Prepare sockaddr_in structure
   mov word [sockaddr_in], AF_INET
   mov word [sockaddr_in+2], 0x901F ; Port 8080 (big-endian)
-  mov dword [sockaddr_in+4], 0      ; Listen on all interfaces
-
+  mov dword [sockaddr_in+4], 0      ; INADDR_ANY
+  
   ; Bind socket
   mov rax, SYS_BIND
-  mov rdi, r12
+  mov rdi, [server_socket]
   mov rsi, sockaddr_in
   mov rdx, 16
   syscall
-
+  
+  cmp rax, 0
+  jl bind_error
+  
   ; Listen for connections
   mov rax, SYS_LISTEN
-  mov rdi, r12
-  mov rsi, 5 ; Backlog 5
+  mov rdi, [server_socket]
+  mov rsi, 10 ; Increased backlog
   syscall
+  
+  cmp rax, 0
+  jl listen_error
+  
+  call print_server_ready
+  ret
 
+start_server_loop:
 accept_loop:
   ; Accept a connection
   mov rax, SYS_ACCEPT
-  mov rdi, r12
+  mov rdi, [server_socket]
   xor rsi, rsi
   xor rdx, rdx
   syscall
-  mov r13, rax ; Save client socket fd
-
+  
+  cmp rax, 0
+  jl accept_loop ; Ignore failed accepts
+  mov [client_socket], rax
+  
   ; Fork to handle the new client
   mov rax, SYS_FORK
   syscall
-
+  
   cmp rax, 0
-  je  child_process ; Child process handles the request
+  je  child_process
+  jg  parent_process
+  
+  ; Fork failed, close client socket and continue
+  mov rax, SYS_CLOSE
+  mov rdi, [client_socket]
+  syscall
+  jmp accept_loop
 
 parent_process:
-  ; Parent closes client socket and loops back to accept
+  ; Parent closes client socket and loops back
   mov rax, SYS_CLOSE
-  mov rdi, r13
+  mov rdi, [client_socket]
   syscall
   jmp accept_loop
 
 child_process:
   ; Child closes listening socket
   mov rax, SYS_CLOSE
-  mov rdi, r12
+  mov rdi, [server_socket]
+  syscall
+  
+  call handle_client_request
+  
+  ; Close client socket and exit child
+  mov rax, SYS_CLOSE
+  mov rdi, [client_socket]
+  syscall
+  
+  mov rax, SYS_EXIT
+  xor rdi, rdi
   syscall
 
+; --- Client Request Handler ---
+handle_client_request:
+  ; Clear request buffer
+  mov rdi, request_buffer
+  mov rcx, MAX_REQUEST_SIZE
+  xor al, al
+  rep stosb
+  
   ; Read request from client
   mov rax, SYS_READ
-  mov rdi, r13
+  mov rdi, [client_socket]
   mov rsi, request_buffer
-  mov rdx, 2048
+  mov rdx, MAX_REQUEST_SIZE - 1
   syscall
-  mov r15, rax ; Save request length
-
-  ; --- HTTP Method Routing ---
+  
+  cmp rax, 0
+  jle invalid_request
+  mov [request_length], rax
+  
+  ; Log the request
+  call log_request
+  
+  ; Route by HTTP method
   mov eax, dword [request_buffer]
+  cmp eax, 'GET '
+  je handle_get
   cmp eax, 'POST'
   je handle_post
   cmp eax, 'PUT '
   je handle_put
   cmp eax, 'DELE'
-  je handle_del
-  cmp eax, 'GET '
-  je handle_get
+  je handle_delete
+  cmp eax, 'HEAD'
+  je handle_head
+  cmp eax, 'OPTI'
+  je handle_options
+  
+  jmp send_405_response
 
-  jmp handle_405 ; Unsupported method
+invalid_request:
+  jmp send_400_response
 
-; --- Filename Parser ---
-parse_filename:
+; --- HTTP Method Handlers ---
+handle_get:
+  lea rsi, [request_buffer + 4] ; Skip "GET "
+  call parse_request_path
+  
+  cmp byte [parsed_filename], 0
+  jne .validate_filename
+  
+  ; Default to index.html
+  mov rsi, default_index
+  mov rdi, parsed_filename
+  call copy_string
+  
+.validate_filename:
+  mov rdi, parsed_filename
+  call is_filename_safe
+  cmp rax, 1
+  jne send_400_response
+  
+  call serve_file
+  ret
+
+handle_head:
+  ; Same as GET but only send headers
+  lea rsi, [request_buffer + 5] ; Skip "HEAD "
+  call parse_request_path
+  
+  cmp byte [parsed_filename], 0
+  jne .validate_filename
+  
+  mov rsi, default_index
+  mov rdi, parsed_filename
+  call copy_string
+  
+.validate_filename:
+  mov rdi, parsed_filename
+  call is_filename_safe
+  cmp rax, 1
+  jne send_400_response
+  
+  call send_file_headers_only
+  ret
+
+handle_options:
+  call send_options_response
+  ret
+
+handle_post:
+  call find_request_body
+  cmp rax, 0
+  je send_400_response
+  
+  mov rsi, post_default_filename
+  mov rdi, parsed_filename
+  call copy_string
+  
+  call write_body_to_file
+  call send_201_response
+  ret
+
+handle_put:
+  lea rsi, [request_buffer + 4] ; Skip "PUT "
+  call parse_request_path
+  
+  mov rdi, parsed_filename
+  call is_filename_safe
+  cmp rax, 1
+  jne send_400_response
+  
+  call find_request_body
+  cmp rax, 0
+  je send_400_response
+  
+  call write_body_to_file
+  call send_200_response
+  ret
+
+handle_delete:
+  lea rsi, [request_buffer + 7] ; Skip "DELETE "
+  call parse_request_path
+  
+  mov rdi, parsed_filename
+  call is_filename_safe
+  cmp rax, 1
+  jne send_400_response
+  
+  ; Check if file exists before attempting delete
+  call file_exists
+  cmp rax, 0
+  je send_404_response
+  
+  mov rax, SYS_UNLINK
+  mov rdi, parsed_filename
+  syscall
+  
+  cmp rax, 0
+  jne send_500_response
+  
+  call send_200_response
+  ret
+
+; --- Utility Functions ---
+parse_request_path:
+  mov rdi, parsed_filename
+  
+  ; Skip leading '/' if present
   cmp byte [rsi], '/'
-  jne .parse_loop ; Doesn't start with '/', parse immediately
-  inc rsi ; Skip leading '/'
-
+  jne .parse_loop
+  inc rsi
+  
 .parse_loop:
   mov al, byte [rsi]
   cmp al, ' '
-  je  .found_eof
+  je .end_path
+  cmp al, '?'
+  je .end_path
+  cmp al, 0
+  je .end_path
+  
   mov byte [rdi], al
   inc rsi
   inc rdi
   jmp .parse_loop
-
-.found_eof:
+  
+.end_path:
   mov byte [rdi], 0
   ret
 
-; --- Method Handlers ---
-handle_post:
+find_request_body:
   xor rcx, rcx
-.find_body_loop:
+  mov rdx, [request_length]
+  sub rdx, 3 ; Need at least 4 bytes for CRLFCRLF
+  
+.search_loop:
+  cmp rcx, rdx
+  jge .not_found
+  
   mov eax, dword [request_buffer + rcx]
   cmp eax, 0x0A0D0A0D ; CRLFCRLF
   je .found_body
+  
   inc rcx
-  cmp rcx, r15
-  jl .find_body_loop
-  jmp handle_400
-
+  jmp .search_loop
+  
 .found_body:
-  lea rbx, [request_buffer + rcx + 4] ; rbx = pointer to body
-  mov rdx, r15
-  sub rdx, rcx
-  sub rdx, 4 ; rdx = length of body
-  mov r15, rdx
-
-.write_post_to_file:
-  mov rax, SYS_OPEN
-  mov rdi, post_filename
-  mov rsi, O_WRONLY or O_CREAT or O_TRUNC
-  mov rdx, 420 ; File permissions (644 octal = 420 decimal)
-  syscall
-  mov r14, rax
-
-  mov rax, SYS_WRITE
-  mov rdi, r14 ; file descriptor
-  mov rsi, rbx ; body pointer
-  mov rdx, r15 ; body length
-  syscall
-
-  mov rax, SYS_CLOSE
-  mov rdi, r14
-  syscall
-
-  mov rsi, http_201
-  mov rdx, len_201
-  jmp send_response
-
-handle_del:
-  lea rsi, [request_buffer + 7] ; "DELETE "
-  lea rdi, [parsed_filename]
-  call parse_filename
-
-  lea rdi, [parsed_filename]
-  call is_filename_safe
-  cmp rax, 1
-  jne handle_400
-
-  mov rax, SYS_UNLINK
-  lea rdi, [parsed_filename]
-  syscall
-
-  cmp rax, 0
-  jne handle_404 ; If unlink failed, file not found
-
-  mov rsi, http_200
-  mov rdx, len_200
-  jmp send_response
-
-handle_put:
-  lea rsi, [request_buffer + 4] ; "PUT "
-  lea rdi, [parsed_filename]
-  call parse_filename
-
-  lea rdi, [parsed_filename]
-  call is_filename_safe
-  cmp rax, 1
-  jne handle_400
-
-  xor rcx, rcx
-.find_body_loop_put:
-  mov eax, dword [request_buffer + rcx]
-  cmp eax, 0x0A0D0A0D
-  je .found_body_put
-  inc rcx
-  cmp rcx, r15
-  jl .find_body_loop_put
-  jmp handle_400
-
-.found_body_put:
-  lea rbx, [request_buffer + rcx + 4]
-  mov rdx, r15
+  lea rax, [request_buffer + rcx + 4]
+  mov [request_body_ptr], rax
+  
+  mov rdx, [request_length]
   sub rdx, rcx
   sub rdx, 4
-  mov r15, rdx
+  mov [request_body_length], rdx
+  
+  mov rax, 1
+  ret
+  
+.not_found:
+  xor rax, rax
+  ret
 
+write_body_to_file:
   mov rax, SYS_OPEN
-  lea rdi, [parsed_filename]
+  mov rdi, parsed_filename
   mov rsi, O_WRONLY or O_CREAT or O_TRUNC
-  mov rdx, 420 ; File permissions (644 octal = 420 decimal)
+  mov rdx, 644o
   syscall
-  mov r14, rax
-
+  
+  cmp rax, 0
+  jl .write_error
+  mov [file_descriptor], rax
+  
   mov rax, SYS_WRITE
-  mov rdi, r14
-  mov rsi, rbx
-  mov rdx, r15
+  mov rdi, [file_descriptor]
+  mov rsi, [request_body_ptr]
+  mov rdx, [request_body_length]
   syscall
-
+  
   mov rax, SYS_CLOSE
-  mov rdi, r14
+  mov rdi, [file_descriptor]
   syscall
+  ret
+  
+.write_error:
+  ret
 
-  mov rsi, http_200
-  mov rdx, len_200
-  jmp send_response
-
-handle_get:
-  lea rsi, [request_buffer + 4]
-  lea rdi, [parsed_filename]
-  call parse_filename
-
-  cmp byte [parsed_filename], 0
-  jne .validate_filename
-
-  lea rdi, [file_root] ; Default to index.html
-  jmp serve_file
-
-.validate_filename:
-  lea rdi, [parsed_filename]
-  call is_filename_safe
-  cmp rax, 1
-  jne handle_400
-
-  lea rdi, [parsed_filename]
-  jmp serve_file
-
-; --- File and Response Logic ---
 serve_file:
   mov rax, SYS_OPEN
+  mov rdi, parsed_filename
   mov rsi, O_RDONLY
   xor rdx, rdx
   syscall
+  
   cmp rax, 0
-  jl handle_404
-  mov r14, rax ; file descriptor
-
+  jl send_404_response
+  mov [file_descriptor], rax
+  
+  ; Get file size using lseek
+  mov rax, SYS_LSEEK
+  mov rdi, [file_descriptor]
+  xor rsi, rsi
+  mov rdx, 2 ; SEEK_END
+  syscall
+  mov [file_size], rax
+  
+  ; Reset to beginning
+  mov rax, SYS_LSEEK
+  mov rdi, [file_descriptor]
+  xor rsi, rsi
+  xor rdx, rdx ; SEEK_SET
+  syscall
+  
+  ; Read file content
   mov rax, SYS_READ
-  mov rdi, r14
+  mov rdi, [file_descriptor]
   mov rsi, file_buffer
-  mov rdx, 8192
+  mov rdx, MAX_FILE_SIZE
   syscall
-  mov r15, rax ; bytes read
-
+  mov [bytes_read], rax
+  
   mov rax, SYS_CLOSE
-  mov rdi, r14
+  mov rdi, [file_descriptor]
   syscall
+  
+  ; Send HTTP response
+  call send_file_with_headers
+  ret
 
-  ; Send 200 OK header
-  mov rax, SYS_WRITE
-  mov rdi, r13
-  mov rsi, http_200
-  mov rdx, len_200
+send_file_headers_only:
+  mov rax, SYS_OPEN
+  mov rdi, parsed_filename
+  mov rsi, O_RDONLY
+  xor rdx, rdx
   syscall
+  
+  cmp rax, 0
+  jl send_404_response
+  mov [file_descriptor], rax
+  
+  ; Get file size
+  mov rax, SYS_LSEEK
+  mov rdi, [file_descriptor]
+  xor rsi, rsi
+  mov rdx, 2 ; SEEK_END
+  syscall
+  mov [file_size], rax
+  
+  mov rax, SYS_CLOSE
+  mov rdi, [file_descriptor]
+  syscall
+  
+  ; Send only headers
+  call send_200_headers
+  ret
 
+send_file_with_headers:
+  call send_200_headers
+  
   ; Send file content
   mov rax, SYS_WRITE
-  mov rdi, r13
+  mov rdi, [client_socket]
   mov rsi, file_buffer
-  mov rdx, r15
+  mov rdx, [bytes_read]
   syscall
-  jmp close_and_exit
-
-handle_400:
-  mov rsi, http_400
-  mov rdx, len_400
-  jmp send_response
-handle_404:
-  mov rsi, http_404
-  mov rdx, len_404
-  jmp send_response
-handle_405:
-  mov rsi, http_405
-  mov rdx, len_405
-  jmp send_response
-
-send_response:
-  mov rax, SYS_WRITE
-  mov rdi, r13
-  syscall
-  jmp close_and_exit
-
-close_and_exit:
-  mov rax, SYS_CLOSE
-  mov rdi, r13
-  syscall
-  mov rax, SYS_EXIT
-  xor rdi, rdi
-  syscall
+  ret
 
 ; --- Security Function ---
 is_filename_safe:
-  ; Check for an empty string.
+  ; Check for empty string
   cmp byte [rdi], 0
-  je  .unsafe
-
+  je .unsafe
+  
 .check_loop:
   mov al, byte [rdi]
   cmp al, 0
-  je  .safe ; End of string, all checks passed
-
-  ; Check 1: Disallow any forward slashes ('/').
+  je .safe
+  
+  ; Disallow path separators
   cmp al, '/'
-  je  .unsafe
-
-  ; Check 2: Look for a dot ('.').
+  je .unsafe
+  cmp al, '\'
+  je .unsafe
+  
+  ; Check for dot sequences
   cmp al, '.'
   jne .continue_loop
-
-  ; If we found a dot, check for an adjacent dot ("..").
+  
+  ; Check for .. (parent directory)
   cmp byte [rdi + 1], '.'
-  je  .unsafe
-
+  je .unsafe
+  
 .continue_loop:
   inc rdi
   jmp .check_loop
-
+  
 .safe:
   mov rax, 1
   ret
-
+  
 .unsafe:
   xor rax, rax
   ret
 
-; ===================================================================
-;                            DATA SEGMENT
-; ===================================================================
+file_exists:
+  mov rax, SYS_OPEN
+  mov rdi, parsed_filename
+  mov rsi, O_RDONLY
+  xor rdx, rdx
+  syscall
+  
+  cmp rax, 0
+  jl .not_exists
+  
+  ; File exists, close it
+  mov rdi, rax
+  mov rax, SYS_CLOSE
+  syscall
+  
+  mov rax, 1
+  ret
+  
+.not_exists:
+  xor rax, rax
+  ret
+
+copy_string:
+  ; rsi = source, rdi = destination
+.copy_loop:
+  mov al, byte [rsi]
+  mov byte [rdi], al
+  cmp al, 0
+  je .done
+  inc rsi
+  inc rdi
+  jmp .copy_loop
+.done:
+  ret
+
+; --- HTTP Response Functions ---
+send_200_headers:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_200_headers
+  mov rdx, len_200_headers
+  syscall
+  ret
+
+send_200_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_200_response
+  mov rdx, len_200_response
+  syscall
+  ret
+
+send_201_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_201_response
+  mov rdx, len_201_response
+  syscall
+  ret
+
+send_400_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_400_response
+  mov rdx, len_400_response
+  syscall
+  ret
+
+send_404_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_404_response
+  mov rdx, len_404_response
+  syscall
+  ret
+
+send_405_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_405_response
+  mov rdx, len_405_response
+  syscall
+  ret
+
+send_500_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_500_response
+  mov rdx, len_500_response
+  syscall
+  ret
+
+send_options_response:
+  mov rax, SYS_WRITE
+  mov rdi, [client_socket]
+  mov rsi, http_options_response
+  mov rdx, len_options_response
+  syscall
+  ret
+
+; --- Logging and Output Functions ---
+print_startup_banner:
+  mov rax, SYS_WRITE
+  mov rdi, 1 ; stdout
+  mov rsi, startup_banner
+  mov rdx, len_startup_banner
+  syscall
+  ret
+
+print_server_ready:
+  mov rax, SYS_WRITE
+  mov rdi, 1 ; stdout
+  mov rsi, server_ready_msg
+  mov rdx, len_server_ready_msg
+  syscall
+  ret
+
+log_request:
+  mov rax, SYS_WRITE
+  mov rdi, 1 ; stdout
+  mov rsi, log_prefix
+  mov rdx, len_log_prefix
+  syscall
+  
+  ; Extract and print method and path
+  mov rsi, request_buffer
+  mov rcx, 0
+.find_newline:
+  cmp byte [rsi + rcx], 0x0D
+  je .found_newline
+  cmp byte [rsi + rcx], 0x0A
+  je .found_newline
+  inc rcx
+  cmp rcx, 100 ; Limit to 100 chars
+  jl .find_newline
+.found_newline:
+  
+  mov rax, SYS_WRITE
+  mov rdi, 1 ; stdout
+  mov rsi, request_buffer
+  mov rdx, rcx
+  syscall
+  
+  mov rax, SYS_WRITE
+  mov rdi, 1 ; stdout
+  mov rsi, newline
+  mov rdx, 1
+  syscall
+  ret
+
+; --- Error Handlers ---
+socket_error:
+  mov rax, SYS_WRITE
+  mov rdi, 2 ; stderr
+  mov rsi, error_socket
+  mov rdx, len_error_socket
+  syscall
+  jmp exit_error
+
+bind_error:
+  mov rax, SYS_WRITE
+  mov rdi, 2 ; stderr
+  mov rsi, error_bind
+  mov rdx, len_error_bind
+  syscall
+  jmp exit_error
+
+listen_error:
+  mov rax, SYS_WRITE
+  mov rdi, 2 ; stderr
+  mov rsi, error_listen
+  mov rdx, len_error_listen
+  syscall
+  jmp exit_error
+
+exit_error:
+  mov rax, SYS_EXIT
+  mov rdi, 1
+  syscall
+
+;data
 segment readable writeable
 
-  file_root db 'index.html', 0
-  file_test db 'test.html', 0
+; --- Messages ---
+startup_banner db 'Simple HTTP Server v2.0', 0x0A, '========================', 0x0A
+len_startup_banner = $ - startup_banner
 
-  ; HTTP Headers
-  http_200    db 'HTTP/1.1 200 OK', 0Dh, 0Ah, 'Content-Type: text/html', 0Dh, 0Ah, 0Dh, 0Ah
-  len_200     = $ - http_200
+server_ready_msg db 'Server listening on port 8080...', 0x0A, 'Press Ctrl+C to stop.', 0x0A
+len_server_ready_msg = $ - server_ready_msg
 
-  post_filename db 'post_result.txt', 0
-  http_201    db 'HTTP/1.1 201 Created', 0Dh, 0Ah, 0Dh, 0Ah, 'File created successfully.'
-  len_201     = $ - http_201
+log_prefix db '[REQUEST] '
+len_log_prefix = $ - log_prefix
 
-  http_400    db 'HTTP/1.1 400 Bad Request', 0Dh, 0Ah, 0Dh, 0Ah, '<h1>400 Bad Request</h1>'
-  len_400     = $ - http_400
+newline db 0x0A
 
-  http_404    db 'HTTP/1.1 404 Not Found', 0Dh, 0Ah, 0Dh, 0Ah, '<h1>404 Not Found</h1>'
-  len_404     = $ - http_404
+; --- Error Messages ---
+error_socket db 'ERROR: Failed to create socket', 0x0A
+len_error_socket = $ - error_socket
 
-  http_405    db 'HTTP/1.1 405 Method Not Allowed', 0Dh, 0Ah, 0Dh, 0Ah, 'Method Not Allowed.'
-  len_405     = $ - http_405
+error_bind db 'ERROR: Failed to bind socket (port may be in use)', 0x0A
+len_error_bind = $ - error_bind
 
-  sockaddr_in     rb 16
-  request_buffer  rb 2048
-  file_buffer     rb 8192
-  parsed_filename rb 256
+error_listen db 'ERROR: Failed to listen on socket', 0x0A
+len_error_listen = $ - error_listen
+
+; --- HTTP Responses ---
+http_200_headers db 'HTTP/1.1 200 OK', 0x0D, 0x0A
+                 db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                 db 'Content-Type: text/html', 0x0D, 0x0A
+                 db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+len_200_headers = $ - http_200_headers
+
+http_200_response db 'HTTP/1.1 200 OK', 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Content-Type: text/plain', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db 'Operation completed successfully.', 0x0A
+len_200_response = $ - http_200_response
+
+http_201_response db 'HTTP/1.1 201 Created', 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Content-Type: text/plain', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db 'Resource created successfully.', 0x0A
+len_201_response = $ - http_201_response
+
+http_400_response db 'HTTP/1.1 400 Bad Request', 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Content-Type: text/html', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db '<h1>400 Bad Request</h1><p>Invalid request format or unsafe filename.</p>', 0x0A
+len_400_response = $ - http_400_response
+
+http_404_response db 'HTTP/1.1 404 Not Found', 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Content-Type: text/html', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db '<h1>404 Not Found</h1><p>The requested resource was not found.</p>', 0x0A
+len_404_response = $ - http_404_response
+
+http_405_response db 'HTTP/1.1 405 Method Not Allowed', 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Allow: GET, POST, PUT, DELETE, HEAD, OPTIONS', 0x0D, 0x0A
+                  db 'Content-Type: text/html', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db '<h1>405 Method Not Allowed</h1><p>Supported methods: GET, POST, PUT, DELETE, HEAD, OPTIONS</p>', 0x0A
+len_405_response = $ - http_405_response
+
+http_500_response db 'HTTP/1.1 500 Internal Server Error', 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Content-Type: text/html', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db '<h1>500 Internal Server Error</h1><p>An error occurred while processing your request.</p>', 0x0A
+len_500_response = $ - http_500_response
+
+http_options_response db 'HTTP/1.1 200 OK', 0x0D, 0x0A
+                      db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                      db 'Allow: GET, POST, PUT, DELETE, HEAD, OPTIONS', 0x0D, 0x0A
+                      db 'Access-Control-Allow-Origin: *', 0x0D, 0x0A
+                      db 'Access-Control-Allow-Methods: GET, POST, PUT, DELETE, HEAD, OPTIONS', 0x0D, 0x0A
+                      db 'Access-Control-Allow-Headers: Content-Type', 0x0D, 0x0A
+                      db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+len_options_response = $ - http_options_response
+
+; --- Default Files ---
+default_index db 'index.html', 0
+post_default_filename db 'post_data.txt', 0
+
+; --- Socket option ---
+socket_option_one dd 1
+
+; --- Buffers and Variables ---
+sockaddr_in         rb 16
+request_buffer      rb MAX_REQUEST_SIZE
+file_buffer         rb MAX_FILE_SIZE
+parsed_filename     rb MAX_FILENAME_LEN
+
+server_socket       rq 1
+client_socket       rq 1
+file_descriptor     rq 1
+request_length      rq 1
+request_body_ptr    rq 1
+request_body_length rq 1
+file_size           rq 1
+bytes_read          rq 1
