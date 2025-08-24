@@ -18,7 +18,7 @@ class Block:
         if not self.data:
             return hashlib.sha256(b'').hexdigest()
         
-        tx_hashes = [hashlib.sha256(json.dumps(tx, sort_keys=True).encode()).hexdigest() for tx in self.data]
+        tx_hashes = [hashlib.sha256(json.dumps(tx, sort_keys=True, separators=(',', ':')).encode()).hexdigest() for tx in self.data]
         
         while len(tx_hashes) > 1:
             next_level = []
@@ -31,9 +31,10 @@ class Block:
             tx_hashes = next_level
         
         return tx_hashes[0] if tx_hashes else hashlib.sha256(b'').hexdigest()
-    
+        
     def calculate_hash(self) -> str:
-        block_string = f"{self.index}{self.timestamp}{self.data}{self.previous_hash}{self.nonce}{self.merkle_root}"
+        data_string = json.dumps(self.data, sort_keys=True, separators=(',', ':'))
+        block_string = f"{self.index}{self.timestamp}{data_string}{self.previous_hash}{self.nonce}{self.merkle_root}"
         return hashlib.sha256(block_string.encode()).hexdigest()
 
     def to_dict(self) -> Dict[str, Any]:
