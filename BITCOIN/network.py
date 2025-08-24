@@ -76,13 +76,21 @@ def add_transaction():
         print(f"⚠️  Transaction {tx.tx_id[:8]} already exists, skipping")
         return jsonify({'message': 'Transaction already exists'}), 200
     
-    if blockchain.transaction_pool.add_transaction(tx):
+    if blockchain.transaction_pool.add_transaction(tx, blockchain):
         if not is_broadcast:
             print(f"📡 Broadcasting transaction: {tx.tx_id[:8]}")
             broadcast_transaction(tx)
         
         return jsonify({'message': 'Transaction added', 'tx_id': tx.tx_id}), 201
-    return jsonify({'message': 'Invalid transaction'}), 400
+    else:
+        if tx.sender != "Network":  # Don't check balance for mining rewards
+            balance = blockchain.get_balance(tx.sender)
+            return jsonify({
+                'message': 'Invalid transaction - insufficient balance',
+                'balance': balance,
+                'required': tx.amount
+            }), 400
+        return jsonify({'message': 'Invalid transaction'}), 400
 
 def broadcast_transaction(tx):
     tx_dict = tx.to_dict()  

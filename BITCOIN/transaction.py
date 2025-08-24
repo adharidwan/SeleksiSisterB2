@@ -29,7 +29,6 @@ class Transaction:
     
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> 'Transaction':
-        # Create transaction without calling __init__ to preserve original data
         tx = Transaction.__new__(Transaction)
         tx.sender = data['sender']
         tx.recipient = data['recipient']
@@ -37,28 +36,46 @@ class Transaction:
         tx.timestamp = data.get('timestamp', datetime.now().isoformat())
         tx.tx_id = data.get('tx_id')
         
-        # If tx_id is missing, calculate it
         if not tx.tx_id:
             tx.tx_id = tx.calculate_hash()
         
         return tx
    
-    def is_valid(self) -> bool:
+    def is_valid(self, blockchain=None) -> bool:
         if not self.sender or not self.recipient:
             return False
         if self.amount <= 0:
             return False
+        
+        if self.sender == "Network":
+            return True
+            
+        if blockchain is not None:
+            sender_balance = blockchain.get_balance(self.sender)
+            
+            pending_amount = 0
+            for tx in blockchain.transaction_pool.get_transactions().values():
+                if tx.sender == self.sender and tx.tx_id != self.tx_id:
+                    pending_amount += tx.amount
+            
+            available_balance = sender_balance - pending_amount
+            
+            if available_balance < self.amount:
+                print(f"Insufficient balance: {self.sender} has {sender_balance}, "
+                      f"pending {pending_amount}, available {available_balance}, "
+                      f"trying to spend {self.amount}")
+                return False
+        
         return True
 
 class TransactionPool:
     def __init__(self):
         self.transactions: Dict[str, Transaction] = {}
     
-    def add_transaction(self, transaction: Transaction) -> bool:
-        if not transaction.is_valid():
+    def add_transaction(self, transaction: Transaction, blockchain=None) -> bool:
+        if not transaction.is_valid(blockchain):
             return False
         
-        # Check if transaction already exists (prevent duplicates)
         if transaction.tx_id in self.transactions:
             return False
             
