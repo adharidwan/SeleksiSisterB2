@@ -34,9 +34,9 @@ IDENTIFICATION DIVISION.
 
        77 ACC-ACCOUNT           PIC 9(6).
        77 ACC-ACTION            PIC X(3).
-       77 ACC-BALANCE           PIC S9(10)V99.
+       77 ACC-BALANCE           PIC 9(10)V99.
 
-       77 TMP-BALANCE           PIC S9(10)V99.
+       77 TMP-BALANCE           PIC 9(10)V99.
        77 MATCH-FOUND           PIC X VALUE "N".
        77 UPDATED               PIC X VALUE "N".
 
@@ -44,7 +44,7 @@ IDENTIFICATION DIVISION.
        77 BALANCE-TEXT          PIC X(20).
 
        77 BALANCE-ALPHA         PIC X(20).
-       77 LARGE-FORMATTED       PIC S9(10).99.
+       77 LARGE-FORMATTED       PIC 9(10).99.
 
        PROCEDURE DIVISION.
 
