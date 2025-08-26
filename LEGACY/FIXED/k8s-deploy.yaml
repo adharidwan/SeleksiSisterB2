@@ -24,7 +24,7 @@ metadata:
   labels:
     app: rai-stone-banking
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: rai-stone-banking
@@ -33,9 +33,22 @@ spec:
       labels:
         app: rai-stone-banking
     spec:
+      initContainers:
+      - name: setup-data
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          cp /config/accounts.txt /data/accounts.txt
+          chmod 666 /data/accounts.txt
+        volumeMounts:
+        - name: banking-config
+          mountPath: /config
+        - name: banking-data
+          mountPath: /data
       containers:
       - name: banking-app
-        image: rai-stone-banking:latest
+        image: acrraistonebanking5343.azurecr.io/rai-stone-banking:latest #change to your ACR image
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -68,9 +81,11 @@ spec:
           mountPath: /workspace/accounts.txt
           subPath: accounts.txt
       volumes:
-      - name: banking-data
+      - name: banking-config
         configMap:
           name: banking-config
+      - name: banking-data
+        emptyDir: {}
 
 ---
 apiVersion: v1
@@ -101,8 +116,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: rai-stone-banking
-  minReplicas: 2
-  maxReplicas: 10
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
   - type: Resource
     resource:

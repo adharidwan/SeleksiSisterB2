@@ -172,7 +172,17 @@ IDENTIFICATION DIVISION.
 
        FINALIZE.
            IF UPDATED = "Y"
-               CALL "SYSTEM" USING "mv temp.txt accounts.txt"
+               OPEN OUTPUT ACC-FILE
+               OPEN INPUT TMP-FILE
+               PERFORM UNTIL 1 = 2
+                   READ TMP-FILE
+                       AT END
+                           EXIT PERFORM
+                       NOT AT END
+                           WRITE ACC-RECORD-RAW FROM TMP-RECORD
+               END-PERFORM
+               CLOSE TMP-FILE
+               CLOSE ACC-FILE
            END-IF
            OPEN OUTPUT OUT-FILE
            WRITE OUT-RECORD

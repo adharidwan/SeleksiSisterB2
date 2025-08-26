@@ -28,10 +28,10 @@ First, we'll set up the foundational resources: a resource group to hold everyth
 
 ```bash
 #Example
-RESOURCE_GROUP="rg-rai-stone-banking-manual"
+RESOURCE_GROUP="rg-rai-stone-banking"
 LOCATION="southeastasia"
 ACR_NAME="acrraistonebanking$(date +%s | tail -c 5)" # Creates a unique name
-AKS_NAME="aks-rai-stone-banking-manual"
+AKS_NAME="aks-rai-stone-banking"
 ```
 
 ### Create the Resource Group
