@@ -48,7 +48,7 @@ spec:
           mountPath: /data
       containers:
       - name: banking-app
-        image: acrraistonebanking2.azurecr.io/rai-stone-banking:latest #sesuaikan
+        image: acrraistonebanking2.azurecr.io/rai-stone-banking:latest # Pastikan ini benar
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -93,10 +93,8 @@ kind: Service
 metadata:
   name: rai-stone-banking-service
   namespace: rai-stone-banking
-  labels:
-    app: rai-stone-banking
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   ports:
   - port: 80
     targetPort: 8000
@@ -105,3 +103,22 @@ spec:
   selector:
     app: rai-stone-banking
 
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rai-stone-banking-ingress
+  namespace: rai-stone-banking
+spec:
+  ingressClassName: nginx
+  rules:
+  # - host: "banking.your-domain.com" # Masih dikomentari untuk pengujian IP
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: rai-stone-banking-service
+            port:
+              name: http

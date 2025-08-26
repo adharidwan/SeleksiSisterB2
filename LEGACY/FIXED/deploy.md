@@ -100,9 +100,36 @@ With the infrastructure ready and the image in our registry, we can now deploy t
 Your `k8s-deploy.yaml` file needs to know the full path to your image in ACR. This sed command updates it for you.
 
 ```bash
-sed -i.bak 's|^.*image: .*\/rai-stone-banking:latest.*$|        image: '"${ACR_NAME}"'.azurecr.io/rai-stone-banking:latest|' k8s-deploy.yaml```
+sed -i.bak 's|^.*image: .*\/rai-stone-banking:latest.*$|        image: '"${ACR_NAME}"'.azurecr.io/rai-stone-banking:latest|' k8s-deploy.yaml
+```
 
 > **Note**: If you prefer, you can manually edit the `k8s-deploy.yaml` file and change the `image:` line yourself.
+
+### Setup Reverse Proxy using Ingress NGINX Controller
+
+#### Setup Ingress NGINX Controller
+If u dont have Helm yet, install it using
+```
+curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update
+sudo apt-get install helm -y
+```
+
+Verify
+```
+helm version
+```
+
+Installing Ingress NGINX Controller
+```
+# Tambahkan repository ingress-nginx
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+# Instal controllernya
+helm install ingress-nginx ingress-nginx/ingress-nginx --namespace ingress-nginx --create-namespace
+```
 
 ### Apply the Manifest to the Cluster
 This command tells Kubernetes to create the resources (Deployment, Service, etc.) defined in your YAML file.
