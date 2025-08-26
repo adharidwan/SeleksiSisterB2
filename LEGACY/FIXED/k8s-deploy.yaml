@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rai-stone-banking
+  labels:
+    app: rai-stone-banking
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: banking-config
+  namespace: rai-stone-banking
+data:
+  accounts.txt: |
+    123456BAL0000001690.00
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rai-stone-banking
+  namespace: rai-stone-banking
+  labels:
+    app: rai-stone-banking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rai-stone-banking
+  template:
+    metadata:
+      labels:
+        app: rai-stone-banking
+    spec:
+      containers:
+      - name: banking-app
+        image: rai-stone-banking:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: ENVIRONMENT
+          value: "azure"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        workingDir: /workspace
+        volumeMounts:
+        - name: banking-data
+          mountPath: /workspace/accounts.txt
+          subPath: accounts.txt
+      volumes:
+      - name: banking-data
+        configMap:
+          name: banking-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rai-stone-banking-service
+  namespace: rai-stone-banking
+  labels:
+    app: rai-stone-banking
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: rai-stone-banking
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rai-stone-banking-hpa
+  namespace: rai-stone-banking
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rai-stone-banking
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
