@@ -30,7 +30,7 @@ First, we'll set up the foundational resources: a resource group to hold everyth
 #Example
 RESOURCE_GROUP="rg-rai-stone-banking"
 LOCATION="southeastasia"
-ACR_NAME="acrraistonebanking$(date +%s | tail -c 5)" # Creates a unique name
+ACR_NAME="acrraistonebanking2" 
 AKS_NAME="aks-rai-stone-banking"
 ```
 
@@ -100,8 +100,7 @@ With the infrastructure ready and the image in our registry, we can now deploy t
 Your `k8s-deploy.yaml` file needs to know the full path to your image in ACR. This sed command updates it for you.
 
 ```bash
-sed -i.bak "s|rai-stone-banking:latest|${ACR_NAME}.azurecr.io/rai-stone-banking:latest|g" k8s-deploy.yaml
-```
+sed -i.bak 's|^.*image: .*\/rai-stone-banking:latest.*$|        image: '"${ACR_NAME}"'.azurecr.io/rai-stone-banking:latest|' k8s-deploy.yaml```
 
 > **Note**: If you prefer, you can manually edit the `k8s-deploy.yaml` file and change the `image:` line yourself.
 

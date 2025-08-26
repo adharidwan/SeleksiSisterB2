@@ -15,5 +15,16 @@ docker build -t cobol-app .
 docker run --rm -p 8000:8000 cobol-app
 ```
 
+Feature:
+The program default are running interest with 20% / 23 s, to disable it modify the following line at Dockerfile:
+```
+ARG APPLY_INTEREST_ARG=true
+```
+Into:
+```
+ARG APPLY_INTEREST_ARG=false
+```
+
+
 Deployment:
 <TBD> #will be deployed H Day

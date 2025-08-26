@@ -11,13 +11,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /workspace
 
 COPY app.py index.html main.cob accounts.txt requirements.txt ./
+COPY start.sh ./
 
-# Install Python dependencies
+RUN chmod +x start.sh
+
+ARG APPLY_INTEREST_ARG=true
+ENV APPLY_INTEREST=$APPLY_INTEREST_ARG
+
 RUN python3 -m pip install -r requirements.txt
 
-# Compile COBOL program
 RUN cobc -free -x -o main main.cob
 
 EXPOSE 8000
 
-CMD ["python3", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./start.sh"]

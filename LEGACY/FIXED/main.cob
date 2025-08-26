@@ -10,13 +10,11 @@ IDENTIFICATION DIVISION.
                ORGANIZATION IS LINE SEQUENTIAL.
            SELECT OUT-FILE ASSIGN TO "output.txt"
                ORGANIZATION IS LINE SEQUENTIAL.
-
        DATA DIVISION.
        FILE SECTION.
 
        FD IN-FILE.
        01 IN-RECORD             PIC X(18).
-
        FD ACC-FILE.
        01 ACC-RECORD-RAW        PIC X(25).
 
@@ -35,26 +33,90 @@ IDENTIFICATION DIVISION.
 
        77 ACC-ACCOUNT           PIC 9(6).
        77 ACC-BALANCE           PIC 9(10)V99.
-
        77 TMP-BALANCE           PIC 9(10)V99.
        77 MATCH-FOUND           PIC X VALUE "N".
        77 UPDATED               PIC X VALUE "N".
-
-       *> IDR Conversion variables (Rai Stone to IDR)
-       *> Based on average value: 1 Rai Stone = 119,714,660 IDR
+       
        77 RAI-TO-IDR-RATE       PIC 9(9) VALUE 119714660.
        77 IDR-BALANCE           PIC 9(18).
        77 RAI-FORMATTED         PIC Z(9)9.99.
        77 IDR-FORMATTED         PIC Z(12)Z,ZZZ,ZZZ,ZZ9.
-
        77 BALANCE-TEXT          PIC X(40).
        77 IDR-TEXT              PIC X(40).
        77 BALANCE-ALPHA         PIC X(25).
        77 IDR-ALPHA             PIC X(25).
 
-       PROCEDURE DIVISION.
+       *> Bonus: Variabel Kalkulasi Bunga (Telah Diperbarui)
+       77 CMD-ARG               PIC X(20).
+       *> Suku bunga 20% (0.20) per interval untuk demonstrasi yang terlihat
+       77 INTEREST-RATE         PIC 9V99 VALUE 0.20.
+       77 INTEREST-AMOUNT       PIC S9(10)V99.
+       77 SLEEP-DURATION-SEC    PIC 9(9) VALUE 23.
+       77 FILE-HAS-RECORDS      PIC X.
 
-       MAIN.
+       PROCEDURE DIVISION.
+       
+       ACCEPT CMD-ARG FROM COMMAND-LINE.
+
+       IF FUNCTION TRIM(CMD-ARG) = "--apply-interest"
+           PERFORM APPLY-INTEREST-IN-LOOP
+       ELSE
+           PERFORM RUN-SINGLE-TRANSACTION
+       END-IF.
+       STOP RUN.
+
+       APPLY-INTEREST-IN-LOOP.
+           PERFORM UNTIL 1 = 2
+               CALL "C$SLEEP" USING SLEEP-DURATION-SEC
+               PERFORM CALCULATE-ALL-INTEREST
+               PERFORM SWAP-ACCOUNT-FILE
+           END-PERFORM.
+
+       CALCULATE-ALL-INTEREST.
+           MOVE 'N' TO FILE-HAS-RECORDS.
+           OPEN INPUT ACC-FILE.
+           OPEN OUTPUT TMP-FILE.
+           PERFORM UNTIL 1 = 2
+               READ ACC-FILE
+                   AT END
+                       EXIT PERFORM
+                   NOT AT END
+                       MOVE 'Y' TO FILE-HAS-RECORDS
+                       MOVE ACC-RECORD-RAW(1:6) TO ACC-ACCOUNT
+                       MOVE FUNCTION NUMVAL(ACC-RECORD-RAW(10:13))
+                           TO ACC-BALANCE
+                       
+                       *> Logika kalkulasi yang disederhanakan agar terlihat
+                       COMPUTE INTEREST-AMOUNT ROUNDED = 
+                           ACC-BALANCE * INTEREST-RATE
+                       
+                       ADD INTEREST-AMOUNT TO ACC-BALANCE
+                       
+                       MOVE ACC-ACCOUNT TO TMP-RECORD(1:6)
+                       MOVE "BAL"       TO TMP-RECORD(7:3)
+                       MOVE ACC-BALANCE TO RAI-FORMATTED
+                       MOVE RAI-FORMATTED TO TMP-RECORD(10:13)
+                       WRITE TMP-RECORD
+           END-PERFORM.
+           CLOSE ACC-FILE.
+           CLOSE TMP-FILE.
+
+       SWAP-ACCOUNT-FILE.
+           IF FILE-HAS-RECORDS = 'Y'
+               OPEN INPUT TMP-FILE
+               OPEN OUTPUT ACC-FILE
+               PERFORM UNTIL 1 = 2
+                   READ TMP-FILE
+                       AT END
+                           EXIT PERFORM
+                       NOT AT END
+                           WRITE ACC-RECORD-RAW FROM TMP-RECORD
+               END-PERFORM
+               CLOSE TMP-FILE
+               CLOSE ACC-FILE
+           END-IF.
+
+       RUN-SINGLE-TRANSACTION.
            PERFORM READ-INPUT
            PERFORM VALIDATE-TRANSACTION
 
@@ -70,8 +132,7 @@ IDENTIFICATION DIVISION.
                END-IF
            END-IF
 
-           PERFORM FINALIZE
-           STOP RUN.
+           PERFORM FINALIZE.
 
        READ-INPUT.
            OPEN INPUT IN-FILE
@@ -89,7 +150,7 @@ IDENTIFICATION DIVISION.
            IF IN-RAW-AMOUNT > 999999.99
                MOVE "N" TO IS-VALID-TRANSACTION
                MOVE "TRANSACTION REJECTED: AMOUNT EXCEEDS LIMIT."
-                 TO OUT-RECORD
+                   TO OUT-RECORD
            ELSE
                MOVE IN-RAW-AMOUNT TO IN-AMOUNT
            END-IF.
@@ -144,16 +205,13 @@ IDENTIFICATION DIVISION.
 
        DISPLAY-BALANCE-WITH-IDR.
            MOVE SPACES TO OUT-RECORD
-           
            MOVE TMP-BALANCE TO RAI-FORMATTED
            MOVE "RAI STONE BALANCE: " TO BALANCE-TEXT
            MOVE RAI-FORMATTED TO BALANCE-ALPHA
-           
            COMPUTE IDR-BALANCE = TMP-BALANCE * RAI-TO-IDR-RATE
            MOVE IDR-BALANCE TO IDR-FORMATTED
            MOVE " | IDR EQUIVALENT: Rp" TO IDR-TEXT
            MOVE IDR-FORMATTED TO IDR-ALPHA
-           
            STRING BALANCE-TEXT DELIMITED BY SIZE
                   FUNCTION TRIM(BALANCE-ALPHA) DELIMITED BY SIZE
                   IDR-TEXT DELIMITED BY SIZE
@@ -166,7 +224,6 @@ IDENTIFICATION DIVISION.
            MOVE "BAL"       TO ACC-RECORD-RAW(7:3)
            MOVE IN-AMOUNT TO RAI-FORMATTED
            MOVE RAI-FORMATTED TO ACC-RECORD-RAW(10:13)
-
            WRITE ACC-RECORD-RAW
            CLOSE ACC-FILE.
 

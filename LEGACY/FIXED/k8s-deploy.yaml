@@ -48,7 +48,7 @@ spec:
           mountPath: /data
       containers:
       - name: banking-app
-        image: acrraistonebanking5343.azurecr.io/rai-stone-banking:latest #change to your ACR image
+        image: acrraistonebanking2.azurecr.io/rai-stone-banking:latest #sesuaikan
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -105,23 +105,3 @@ spec:
   selector:
     app: rai-stone-banking
 
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: rai-stone-banking-hpa
-  namespace: rai-stone-banking
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: rai-stone-banking
-  minReplicas: 1
-  maxReplicas: 1
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
