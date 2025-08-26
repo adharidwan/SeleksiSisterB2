@@ -1,17 +1,5 @@
        IDENTIFICATION DIVISION.
        PROGRAM-ID. BANKING.
-      *>******************************************************************
-      *> This program processes a single banking transaction from an
-      *> input file against an accounts file.
-      *> It supports creating new accounts (NEW), deposits (DEP),
-      *> withdrawals (WDR), and balance checks (BAL).
-      *>
-      *> MODIFICATION:
-      *> - Added validation to reject transactions > 999,999.99.
-      *> - Corrected logic to handle account balances up to 9,999,999,999.99.
-      *> - Ensured file format for balances is consistently 13 characters.
-      *>******************************************************************
-
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
@@ -56,8 +44,6 @@
 
        77 BALANCE-TEXT          PIC X(20).
        77 BALANCE-ALPHA         PIC X(20).
-       *> MOD: This field was unused. It is now used correctly to format
-       *>      the full 10-digit balance for file I/O and display.
        77 LARGE-FORMATTED       PIC Z(9)9.99.
 
        PROCEDURE DIVISION.
@@ -66,7 +52,6 @@
            PERFORM READ-INPUT
            PERFORM VALIDATE-TRANSACTION
 
-           *> MOD: Only process the transaction if it passes validation.
            IF IS-VALID-TRANSACTION = 'Y'
                PERFORM PROCESS-RECORDS
                IF MATCH-FOUND = "N"
@@ -92,10 +77,8 @@
 
            MOVE IN-RECORD(1:6) TO IN-ACCOUNT
            MOVE IN-RECORD(7:3) TO IN-ACTION
-           *> MOD: Read amount into the larger raw field first.
            MOVE FUNCTION NUMVAL(IN-RECORD(10:9)) TO IN-RAW-AMOUNT.
 
-      *> MOD: New paragraph to validate the transaction amount.
        VALIDATE-TRANSACTION.
            IF IN-RAW-AMOUNT > 999999.99
                MOVE "N" TO IS-VALID-TRANSACTION
@@ -108,13 +91,12 @@
        PROCESS-RECORDS.
            OPEN INPUT ACC-FILE
            OPEN OUTPUT TMP-FILE
-           PERFORM UNTIL 1 = 2 *> Loop until explicit exit
+           PERFORM UNTIL 1 = 2 
                READ ACC-FILE
                    AT END
                        EXIT PERFORM
                    NOT AT END
                        MOVE ACC-RECORD-RAW(1:6) TO ACC-ACCOUNT
-                       *> MOD: Read the full 13-character balance from the file.
                        MOVE FUNCTION NUMVAL(ACC-RECORD-RAW(10:13))
                            TO ACC-BALANCE
                        IF ACC-ACCOUNT = IN-ACCOUNT
@@ -154,8 +136,7 @@
            END-EVALUATE
 
            MOVE IN-ACCOUNT TO TMP-RECORD(1:6)
-           MOVE "   "       TO TMP-RECORD(7:3) *> Clear action field
-           *> MOD: Use the larger format field to write the full balance.
+           MOVE "   "       TO TMP-RECORD(7:3)
            MOVE TMP-BALANCE TO LARGE-FORMATTED
            MOVE LARGE-FORMATTED TO TMP-RECORD(10:13)
 
@@ -166,7 +147,6 @@
            OPEN EXTEND ACC-FILE
            MOVE IN-ACCOUNT TO ACC-RECORD-RAW(1:6)
            MOVE "   "       TO ACC-RECORD-RAW(7:3)
-           *> MOD: Use the larger format field to ensure consistent file format.
            MOVE IN-AMOUNT TO LARGE-FORMATTED
            MOVE LARGE-FORMATTED TO ACC-RECORD-RAW(10:13)
 
