@@ -1,4 +1,4 @@
-       IDENTIFICATION DIVISION.
+IDENTIFICATION DIVISION.
        PROGRAM-ID. BANKING.
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
@@ -24,15 +24,13 @@
        01 TMP-RECORD            PIC X(25).
 
        FD OUT-FILE.
-       01 OUT-RECORD            PIC X(80).
+       01 OUT-RECORD            PIC X(120).
 
        WORKING-STORAGE SECTION.
        77 IN-ACCOUNT            PIC 9(6).
        77 IN-ACTION             PIC X(3).
-       *> MOD: Added a larger field to read the raw input amount for validation.
        77 IN-RAW-AMOUNT         PIC 9(7)V99.
        77 IN-AMOUNT             PIC 9(6)V99.
-       *> MOD: Added a flag to track if the transaction is valid.
        77 IS-VALID-TRANSACTION  PIC X VALUE 'Y'.
 
        77 ACC-ACCOUNT           PIC 9(6).
@@ -42,9 +40,17 @@
        77 MATCH-FOUND           PIC X VALUE "N".
        77 UPDATED               PIC X VALUE "N".
 
-       77 BALANCE-TEXT          PIC X(20).
-       77 BALANCE-ALPHA         PIC X(20).
-       77 LARGE-FORMATTED       PIC Z(9)9.99.
+       *> IDR Conversion variables (Rai Stone to IDR)
+       *> Based on average value: 1 Rai Stone = 119,714,660 IDR
+       77 RAI-TO-IDR-RATE       PIC 9(9) VALUE 119714660.
+       77 IDR-BALANCE           PIC 9(18).
+       77 RAI-FORMATTED         PIC Z(9)9.99.
+       77 IDR-FORMATTED         PIC Z(12)Z,ZZZ,ZZZ,ZZ9.
+
+       77 BALANCE-TEXT          PIC X(40).
+       77 IDR-TEXT              PIC X(40).
+       77 BALANCE-ALPHA         PIC X(25).
+       77 IDR-ALPHA             PIC X(25).
 
        PROCEDURE DIVISION.
 
@@ -123,32 +129,43 @@
                        MOVE "INSUFFICIENT FUNDS." TO OUT-RECORD
                    END-IF
                WHEN "BAL"
-                   MOVE SPACES TO OUT-RECORD
-                   MOVE "CURRENT BALANCE: " TO BALANCE-TEXT
-                   *> MOD: Use the larger format field for displaying balance.
-                   MOVE TMP-BALANCE TO LARGE-FORMATTED
-                   MOVE LARGE-FORMATTED TO BALANCE-ALPHA
-                   STRING BALANCE-TEXT DELIMITED BY SIZE
-                          FUNCTION TRIM(BALANCE-ALPHA) DELIMITED BY SIZE
-                          INTO OUT-RECORD
+                   PERFORM DISPLAY-BALANCE-WITH-IDR
                WHEN OTHER
                    MOVE "UNKNOWN ACTION." TO OUT-RECORD
            END-EVALUATE
 
            MOVE IN-ACCOUNT TO TMP-RECORD(1:6)
-           MOVE "   "       TO TMP-RECORD(7:3)
-           MOVE TMP-BALANCE TO LARGE-FORMATTED
-           MOVE LARGE-FORMATTED TO TMP-RECORD(10:13)
+           MOVE "BAL"       TO TMP-RECORD(7:3)
+           MOVE TMP-BALANCE TO RAI-FORMATTED
+           MOVE RAI-FORMATTED TO TMP-RECORD(10:13)
 
            WRITE TMP-RECORD
            MOVE "Y" TO UPDATED.
 
+       DISPLAY-BALANCE-WITH-IDR.
+           MOVE SPACES TO OUT-RECORD
+           
+           MOVE TMP-BALANCE TO RAI-FORMATTED
+           MOVE "RAI STONE BALANCE: " TO BALANCE-TEXT
+           MOVE RAI-FORMATTED TO BALANCE-ALPHA
+           
+           COMPUTE IDR-BALANCE = TMP-BALANCE * RAI-TO-IDR-RATE
+           MOVE IDR-BALANCE TO IDR-FORMATTED
+           MOVE " | IDR EQUIVALENT: Rp" TO IDR-TEXT
+           MOVE IDR-FORMATTED TO IDR-ALPHA
+           
+           STRING BALANCE-TEXT DELIMITED BY SIZE
+                  FUNCTION TRIM(BALANCE-ALPHA) DELIMITED BY SIZE
+                  IDR-TEXT DELIMITED BY SIZE
+                  FUNCTION TRIM(IDR-ALPHA) DELIMITED BY SIZE
+                  INTO OUT-RECORD.
+
        APPEND-ACCOUNT.
            OPEN EXTEND ACC-FILE
            MOVE IN-ACCOUNT TO ACC-RECORD-RAW(1:6)
-           MOVE "   "       TO ACC-RECORD-RAW(7:3)
-           MOVE IN-AMOUNT TO LARGE-FORMATTED
-           MOVE LARGE-FORMATTED TO ACC-RECORD-RAW(10:13)
+           MOVE "BAL"       TO ACC-RECORD-RAW(7:3)
+           MOVE IN-AMOUNT TO RAI-FORMATTED
+           MOVE RAI-FORMATTED TO ACC-RECORD-RAW(10:13)
 
            WRITE ACC-RECORD-RAW
            CLOSE ACC-FILE.
