@@ -15,7 +15,7 @@ COPY start.sh ./
 
 RUN chmod +x start.sh
 
-ARG APPLY_INTEREST_ARG=true
+ARG APPLY_INTEREST_ARG=false
 ENV APPLY_INTEREST=$APPLY_INTEREST_ARG
 
 RUN python3 -m pip install -r requirements.txt
