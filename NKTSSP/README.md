@@ -1,6 +1,6 @@
-# Simple HTTP Server v2.0
+# NKTSSP - Simple HTTP Server v2.0
 
-A lightweight HTTP server written in x86-64 Assembly language using FASM (Flat Assembler). This server implements core HTTP functionality with minimal but essential security features and supports multiple HTTP methods.
+A lightweight HTTP server written in x86-64 Assembly language using NASM with GCC compatibility. This server implements core HTTP functionality with authentication-based route protection and supports multiple HTTP methods.
 
 Made for Sister Selections
 
@@ -14,64 +14,113 @@ Made for Sister Selections
 - **HEAD** - Get headers without file content
 - **OPTIONS** - Show supported methods and CORS headers
 
-### Security Features
+### Authentication & Security Features
+- **Selective Authentication** - Only specific routes (like `secret.html`) require authentication
+- **Bearer Token Authentication** - Uses `Authorization: Bearer <token>` header
 - **Path Traversal Protection** - Blocks `../` and absolute paths
 - **Filename Validation** - Prevents access to system files
 - **Safe Characters Only** - Filters dangerous characters in filenames
 
 ### Server Features
 - **Multi-client Support** - Uses fork() for concurrent connections
-- **Error Handling** - Proper HTTP status codes (200, 201, 400, 404, 405, 500)
+- **Error Handling** - Proper HTTP status codes (200, 201, 400, 401, 404, 405, 500)
 - **Request Logging** - Shows incoming requests in console
 - **Socket Reuse** - Prevents "address already in use" errors
 - **CORS Support** - Handles preflight OPTIONS requests
+- **Docker Support** - Containerized deployment with Dockerfile
+- **Cloud Deployment Ready** - Includes Azure deployment guide
 
 ## Requirements
 
+### Local Development
 - Linux x86-64 system
-- FASM (Flat Assembler)
-- Basic understanding of HTTP protocol
+- NASM (Netwide Assembler)
+- GCC compiler
+- Make utility
 
-### Installing FASM
+### Docker Deployment
+- Docker Engine
+- Docker Compose (optional)
 
+### Cloud Deployment
+- Azure CLI
+- Domain name (for HTTPS setup)
+
+## Installation & Setup
+
+### Installing Dependencies (Ubuntu/Debian)
 ```bash
-# Ubuntu/Debian
-sudo apt-get install fasm
+sudo apt-get update
+sudo apt-get install -y build-essential make nasm
+```
 
-# Arch Linux
-sudo pacman -S fasm
-
-# Or download from: https://flatassembler.net/
+### Installing Dependencies (Arch Linux)
+```bash
+sudo pacman -S base-devel nasm
 ```
 
 ## Compilation and Usage
 
-### 1. Compile the Server
+### Method 1: Direct Compilation
 ```bash
-fasm main.asm
-chmod +x main
+# Compile using the provided Makefile
+make
+
+# Run the server on default port 8080
+./main 8080
 ```
 
-### 2. Run the Server
+### Method 2: Docker Deployment
 ```bash
-./main
+# Build Docker image
+docker build -t nktssp-server .
+
+# Run container
+docker run -d -p 8080:8080 --name nktssp-server nktssp-server
+
+# View logs
+docker logs nktssp-server
+
+# Stop container
+docker stop nktssp-server
 ```
+
+### Method 3: Cloud Deployment (Azure)
+Follow the detailed guide in `deploy.md` for Azure deployment with HTTPS support.
+
+## Server Configuration
 
 The server will display:
 ```
-Simple HTTP Server v2.0
+Hutao HTTP Server v2.0
 ========================
-Server listening on port 8080...
+Server listening on the configured port...
 Press Ctrl+C to stop.
 ```
 
-### 3. Stop the Server
-Press `Ctrl+C` or kill the process:
-```bash
-pkill main
-```
+### Default Settings
+- **Port:** Configurable via command line argument
+- **Max Request Size:** 4096 bytes
+- **Max File Size:** 16384 bytes
+- **Connection Backlog:** 10
+- **Default Index:** index.html
+- **Authentication Token:** `HUTAOTHEGOAT` (defined in auth.c)
 
 ## API Documentation
+
+### Authentication
+Certain routes require authentication using a Bearer token in the Authorization header:
+
+```bash
+# Access protected route (secret.html)
+curl -H "Authorization: Bearer HUTAOTHEGOAT" http://localhost:8080/secret.html
+```
+
+**Protected Routes:**
+- `secret.html` - Requires valid Bearer token
+
+**Public Routes:**
+- All other routes are publicly accessible
 
 ### GET Requests
 
@@ -87,8 +136,15 @@ curl http://localhost:8080/filename.txt
 # Returns the requested file
 ```
 
+#### Access Protected Content
+```bash
+curl -H "Authorization: Bearer HUTAOTHEGOAT" http://localhost:8080/secret.html
+# Returns secret content with valid token
+```
+
 **Response Codes:**
 - `200 OK` - File found and returned
+- `401 Unauthorized` - Invalid or missing token for protected routes
 - `404 Not Found` - File doesn't exist
 - `400 Bad Request` - Invalid filename
 
@@ -157,6 +213,18 @@ curl http://localhost:8080/           # Returns index.html
 curl http://localhost:8080/test.html  # Returns test.html
 ```
 
+### Authentication Testing
+```bash
+# Try accessing protected route without token (should return 401)
+curl http://localhost:8080/secret.html
+
+# Access with correct token (should return 200)
+curl -H "Authorization: Bearer HUTAOTHEGOAT" http://localhost:8080/secret.html
+
+# Try with wrong token (should return 401)
+curl -H "Authorization: Bearer WRONGTOKEN" http://localhost:8080/secret.html
+```
+
 ### File Upload and Management
 ```bash
 # Upload via POST
@@ -192,31 +260,19 @@ curl -X PATCH http://localhost:8080/  # Should return 405
 curl -v http://localhost:8080/
 ```
 
-## Server Configuration
-
-### Default Settings
-- **Port:** 8080
-- **Max Request Size:** 4096 bytes
-- **Max File Size:** 16384 bytes
-- **Connection Backlog:** 10
-- **Default Index:** index.html
-
-### Modifying Settings
-Edit the constants in the source code:
-```assembly
-HTTP_PORT = 8080              ; Change server port
-MAX_REQUEST_SIZE = 4096       ; Change max request size
-MAX_FILE_SIZE = 16384         ; Change max file size
-```
-
-## File Structure
+## Project Structure
 
 ```
-project/
-├── main.asm              # Main server source code
-├── main                  # Compiled executable
-├── index.html            # Default page (optional)
-├── uploaded.txt          # POST data storage
+NKTSSP/
+├── main.asm              # Main server source code (Assembly)
+├── auth.c                # Authentication logic (C)
+├── Makefile              # Build configuration
+├── Dockerfile            # Docker container configuration
+├── deploy.md             # Azure deployment guide
+├── index.html            # Default homepage
+├── secret.html           # Protected content (requires auth)
+├── post_data.txt         # POST data storage
+├── uploaded.txt          # Example uploaded file
 └── README.md             # This file
 ```
 
@@ -225,46 +281,146 @@ project/
 The server includes proper HTTP headers:
 ```
 HTTP/1.1 200 OK
-Server: SimpleHTTP/2.0
+Server: HutaoHTTP/2.0
 Content-Type: text/html
 Connection: close
 ```
 
+For protected routes without proper authentication:
+```
+HTTP/1.1 401 Unauthorized
+Server: HutaoHTTP/2.0
+Content-Type: text/html
+Connection: close
+```
 
 ## Architecture Overview
 
+### Hybrid Language Design
+- **Assembly Core** - High-performance server implementation in x86-64 assembly
+- **C Authentication** - Authentication logic implemented in C for maintainability
+- **GCC Linking** - Seamless integration between Assembly and C components
+
 ### Process Model
-- **Parent Process**: Accepts connections and forks children
-- **Child Process**: Handles individual client requests
-- **Concurrent**: Multiple clients can connect simultaneously
+- **Parent Process** - Accepts connections and forks children
+- **Child Process** - Handles individual client requests with authentication checks
+- **Concurrent** - Multiple clients can connect simultaneously
 
 ### Security Model
-- **Sandboxed**: Each request runs in isolated child process
-- **Validated Input**: All filenames checked for safety
-- **No Shell Access**: Pure system calls, no shell execution
+- **Selective Protection** - Only specified routes require authentication
+- **Token-based Auth** - Simple Bearer token authentication
+- **Sandboxed Execution** - Each request runs in isolated child process
+- **Input Validation** - All filenames and paths checked for safety
+- **No Shell Access** - Pure system calls, no shell execution
 
 ### Memory Management
-- **Stack-based**: Uses stack for local variables
-- **Fixed Buffers**: Prevents buffer overflow attacks
-- **No Dynamic Allocation**: Simple, predictable memory usage
+- **Stack-based** - Uses stack for local variables
+- **Fixed Buffers** - Prevents buffer overflow attacks
+- **No Dynamic Allocation** - Simple, predictable memory usage
 
 ## Performance Characteristics
 
-- **Lightweight**: ~8KB executable size
-- **Fast Startup**: Immediate server availability
-- **Low Memory**: <1MB RSS per process
-- **Concurrent**: Handles multiple clients via forking
+- **Lightweight** - ~8KB executable size
+- **Fast Startup** - Immediate server availability
+- **Low Memory** - <1MB RSS per process
+- **Concurrent** - Handles multiple clients via forking
+- **Efficient Auth** - Authentication only checked for protected routes
+
+## Deployment Options
+
+### 1. Local Development
+- Direct compilation and execution
+- Suitable for development and testing
+
+### 2. Docker Container
+- Containerized deployment
+- Consistent environment across platforms
+- Easy scaling and management
+
+### 3. Cloud Deployment
+- Azure VM with Docker
+- HTTPS support with Let's Encrypt
+- Custom domain configuration
+- Production-ready setup
+
+See `deploy.md` for detailed cloud deployment instructions.
+
+## Configuration
+
+### Modifying Authentication Token
+Edit the `SECRET_TOKEN` in `auth.c`:
+```c
+#define SECRET_TOKEN "YOURNEWTOKEN"
+```
+
+### Adding Protected Routes
+Modify the `is_protected_route()` function in `auth.c`:
+```c
+int is_protected_route(const char *filename) {
+    if (filename != NULL && (
+        strcmp(filename, "secret.html") == 0 ||
+        strcmp(filename, "admin.html") == 0
+    )) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+### Modifying Server Settings
+Edit the constants in `main.asm`:
+```assembly
+; Request/Response buffer sizes
+request_buffer        resb 4096      ; Max request size
+file_buffer           resb 16384     ; Max file size
+```
 
 ## Limitations
 
-- **No HTTPS**: Plain HTTP only
-- **Basic Auth**: No authentication mechanism
-- **Limited MIME**: Basic content-type detection
-- **File Size**: Limited by buffer sizes
-- **No Caching**: No cache headers or etags
+- **No HTTPS** - Plain HTTP only (use reverse proxy for HTTPS)
+- **Simple Auth** - Basic Bearer token authentication
+- **Limited MIME** - Basic content-type detection
+- **File Size** - Limited by buffer sizes
+- **No Caching** - No cache headers or etags
+- **No Session Management** - Stateless authentication only
+
+## Troubleshooting
+
+### Port Already in Use
+```bash
+# Find process using the port
+sudo lsof -i :8080
+
+# Kill the process
+sudo kill -9 <PID>
+```
+
+### Permission Denied
+```bash
+# Make executable
+chmod +x main
+
+# Check if port requires sudo (ports < 1024)
+sudo ./main 80
+```
+
+### Docker Issues
+```bash
+# View container logs
+docker logs nktssp-server
+
+# Debug inside container
+docker exec -it nktssp-server /bin/bash
+```
+
+## Live Demo
+
+The server is currently deployed and accessible at: `hutaogaot.space`
+
+Example requests:
+- `https://hutaogaot.space/` - Public homepage
+- `https://hutaogaot.space/secret.html` - Protected content (requires token)
 
 ## License
 
-This project is provided as-is for labsister selection. Feel free to modify and distribute.
-
-
+This project is provided as-is for educational purposes. Feel free to modify and distribute.
