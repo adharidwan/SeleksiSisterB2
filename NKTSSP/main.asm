@@ -4,7 +4,7 @@ entry start
 
 ; const
 ; Socket constants
-AF_INET     = 2
+AF_INET      = 2
 SOCK_STREAM = 1
 SOL_SOCKET  = 1
 SO_REUSEADDR = 2
@@ -18,20 +18,20 @@ O_TRUNC     = 512
 O_APPEND    = 1024
 
 ; System calls
-SYS_READ    = 0
-SYS_WRITE   = 1
-SYS_OPEN    = 2
-SYS_CLOSE   = 3
-SYS_STAT    = 4
-SYS_LSEEK   = 8
-SYS_SOCKET  = 41
-SYS_ACCEPT  = 43
-SYS_BIND    = 49
-SYS_LISTEN  = 50
+SYS_READ       = 0
+SYS_WRITE      = 1
+SYS_OPEN       = 2
+SYS_CLOSE      = 3
+SYS_STAT       = 4
+SYS_LSEEK      = 8
+SYS_SOCKET     = 41
+SYS_ACCEPT     = 43
+SYS_BIND       = 49
+SYS_LISTEN     = 50
 SYS_SETSOCKOPT = 54
-SYS_FORK    = 57
-SYS_EXIT    = 60
-SYS_UNLINK  = 87
+SYS_FORK       = 57
+SYS_EXIT       = 60
+SYS_UNLINK     = 87
 
 ; HTTP constants
 MAX_REQUEST_SIZE = 4096
@@ -43,11 +43,40 @@ HTTP_PORT = 8080
 segment readable executable
 
 start:
+  pop rax             
+  mov rsi, [rsp]      
+  
+  cmp rax, 2          
+  jl show_usage       
+  mov rsi, [rsp+8]    
+  call string_to_uint 
+  
+  cmp rax, 0          
+  je invalid_port
+  cmp rax, 65535      
+  jg invalid_port
+
+  mov [server_port], ax 
   call print_startup_banner
   call create_and_bind_socket
   call start_server_loop
 
-; --- Socket Creation and Setup ---
+show_usage:
+  mov rax, SYS_WRITE
+  mov rdi, 2 ; stderr
+  mov rsi, usage_msg
+  mov rdx, len_usage_msg
+  syscall
+  jmp exit_error
+
+invalid_port:
+  mov rax, SYS_WRITE
+  mov rdi, 2 ; stderr
+  mov rsi, error_port
+  mov rdx, len_error_port
+  syscall
+  jmp exit_error
+
 create_and_bind_socket:
   ; Create socket
   mov rax, SYS_SOCKET
@@ -55,12 +84,11 @@ create_and_bind_socket:
   mov rsi, SOCK_STREAM
   xor rdx, rdx
   syscall
-  
+
   cmp rax, 0
   jl socket_error
   mov [server_socket], rax
-  
-  ; Set SO_REUSEADDR option
+
   mov rax, SYS_SETSOCKOPT
   mov rdi, [server_socket]
   mov rsi, SOL_SOCKET
@@ -68,31 +96,32 @@ create_and_bind_socket:
   mov r10, socket_option_one
   mov r8, 4
   syscall
-  
-  ; Prepare sockaddr_in structure
+
   mov word [sockaddr_in], AF_INET
-  mov word [sockaddr_in+2], 0x901F ; Port 8080 (big-endian)
-  mov dword [sockaddr_in+4], 0      ; INADDR_ANY
-  
+  mov ax, [server_port]       
+  rol ax, 8                   
+  mov word [sockaddr_in+2], ax    
+  mov dword [sockaddr_in+4], 0     
+
   ; Bind socket
   mov rax, SYS_BIND
   mov rdi, [server_socket]
   mov rsi, sockaddr_in
   mov rdx, 16
   syscall
-  
+
   cmp rax, 0
   jl bind_error
-  
+
   ; Listen for connections
   mov rax, SYS_LISTEN
   mov rdi, [server_socket]
   mov rsi, 10 ; Increased backlog
   syscall
-  
+
   cmp rax, 0
   jl listen_error
-  
+
   call print_server_ready
   ret
 
@@ -291,6 +320,35 @@ handle_delete:
   ret
 
 ; --- Utility Functions ---
+;; MOD: New function to convert string to unsigned integer (atoi)
+;; Input: rsi = pointer to null-terminated string
+;; Output: rax = converted integer, or 0 on error
+string_to_uint:
+  xor rax, rax      ; Clear result register
+  xor rcx, rcx      ; Clear temp register for character
+.loop:
+  mov cl, byte [rsi]
+  cmp cl, 0
+  je .done          ; If null terminator, we're done
+
+  cmp cl, '0'
+  jl .error         ; If char is less than '0', it's not a digit
+  cmp cl, '9'
+  jg .error         ; If char is greater than '9', it's not a digit
+  
+  sub cl, '0'       ; Convert ASCII digit to integer value
+  
+  imul rax, rax, 10 ; Multiply current result by 10
+  add rax, rcx      ; Add the new digit
+  
+  inc rsi
+  jmp .loop
+.done:
+  ret
+.error:
+  xor rax, rax      ; Return 0 on error
+  ret
+
 parse_request_path:
   mov rdi, parsed_filename
   
@@ -678,13 +736,20 @@ segment readable writeable
 startup_banner db 'Simple HTTP Server v2.0', 0x0A, '========================', 0x0A
 len_startup_banner = $ - startup_banner
 
-server_ready_msg db 'Server listening on port 8080...', 0x0A, 'Press Ctrl+C to stop.', 0x0A
+;; MOD: Changed the server ready message to be more generic
+server_ready_msg db 'Server listening on the configured port...', 0x0A, 'Press Ctrl+C to stop.', 0x0A
 len_server_ready_msg = $ - server_ready_msg
 
 log_prefix db '[REQUEST] '
 len_log_prefix = $ - log_prefix
 
 newline db 0x0A
+
+;; MOD: New messages for argument handling
+usage_msg db 'Usage: ./server <port>', 0x0A
+len_usage_msg = $ - usage_msg
+error_port db 'ERROR: Invalid port. Must be a number between 1 and 65535.', 0x0A
+len_error_port = $ - error_port
 
 ; --- Error Messages ---
 error_socket db 'ERROR: Failed to create socket', 0x0A
@@ -698,9 +763,9 @@ len_error_listen = $ - error_listen
 
 ; --- HTTP Responses ---
 http_200_headers db 'HTTP/1.1 200 OK', 0x0D, 0x0A
-                 db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
-                 db 'Content-Type: text/html', 0x0D, 0x0A
-                 db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
+                  db 'Server: SimpleHTTP/2.0', 0x0D, 0x0A
+                  db 'Content-Type: text/html', 0x0D, 0x0A
+                  db 'Connection: close', 0x0D, 0x0A, 0x0D, 0x0A
 len_200_headers = $ - http_200_headers
 
 http_200_response db 'HTTP/1.1 200 OK', 0x0D, 0x0A
@@ -763,16 +828,17 @@ post_default_filename db 'post_data.txt', 0
 socket_option_one dd 1
 
 ; --- Buffers and Variables ---
-sockaddr_in         rb 16
-request_buffer      rb MAX_REQUEST_SIZE
-file_buffer         rb MAX_FILE_SIZE
-parsed_filename     rb MAX_FILENAME_LEN
+sockaddr_in           rb 16
+request_buffer        rb MAX_REQUEST_SIZE
+file_buffer           rb MAX_FILE_SIZE
+parsed_filename       rb MAX_FILENAME_LEN
 
-server_socket       rq 1
-client_socket       rq 1
-file_descriptor     rq 1
-request_length      rq 1
-request_body_ptr    rq 1
-request_body_length rq 1
-file_size           rq 1
-bytes_read          rq 1
+server_socket         rq 1
+client_socket         rq 1
+file_descriptor       rq 1
+request_length        rq 1
+request_body_ptr      rq 1
+request_body_length   rq 1
+file_size             rq 1
+bytes_read            rq 1
+server_port           dw 0
