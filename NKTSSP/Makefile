@@ -1,7 +1,7 @@
 # File: NKTSSP/Makefile (Final Corrected Version)
 
 # Nama executable yang akan dihasilkan
-TARGET = nktssrv
+TARGET = main
 
 # Compiler dan Assembler
 CC = gcc
@@ -37,7 +37,7 @@ $(TARGET): $(OBJS)
 
 # Aturan untuk membersihkan direktori
 clean:
-	rm -f *.o $(TARGET)
+	rm -f *.o 
 	@echo "🧹 Cleanup complete."
 
 .PHONY: all clean
