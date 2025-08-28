@@ -1,10 +1,3 @@
-; =============================================================================
-; NKTSSP - Simple HTTP Server v2.0 with Authentication
-; Author: Adha Ridwan
-; Assembler: NASM (for GCC compatibility)
-; UPDATE: Added selective authentication based on the requested file.
-; =============================================================================
-
 extern check_authentication
 extern is_protected_route
 
