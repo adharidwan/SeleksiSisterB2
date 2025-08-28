@@ -258,3 +258,6 @@ This is a simplified blockchain implementation for educational purposes:
 ## License
 
 This project is for educational purposes. Please ensure proper licensing for production use.
+
+## Video!
+https://youtu.be/LoQa5sim8XQ
